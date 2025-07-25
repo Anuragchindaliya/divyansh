@@ -54,6 +54,9 @@ export default function RootLayout({
             classNames: {
               success:
                 "py-2 px-4 flex bg-green-200 text-green-800 gap-2 rounded-lg shadow-md items-center",
+              error:
+                "py-2 px-4 flex bg-red-200 text-red-800 gap-2 rounded-lg shadow-md items-center",
+              info: "py-2 px-4 flex bg-gray-200 text-gray-800 gap-2 rounded-lg shadow-md items-center",
             },
           }}
         />

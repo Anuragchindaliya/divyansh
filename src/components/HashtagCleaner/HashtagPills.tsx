@@ -1,30 +1,49 @@
 "use client";
 
 import { X } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-interface HashtagPillsProps {
-  hashtags: string[];
-  onRemove: (tag: string) => void;
+type TagState = "ok" | "duplicate" | "overflow";
+
+export interface PillTag {
+  value: string;
+  state: TagState;
 }
 
 export default function HashtagPills({
-  hashtags,
+  tags,
   onRemove,
-}: HashtagPillsProps) {
+}: {
+  tags: PillTag[];
+  onRemove: (tag: string) => void;
+}) {
   return (
     <div className="flex flex-wrap gap-2">
-      {hashtags.map((tag, index) => (
+      {tags.map((t) => (
         <span
-          key={index}
-          className="inline-flex items-center px-3 py-1 bg-pink-100 text-pink-700 rounded-full text-sm font-medium"
+          key={t.value}
+          className={cn(
+            "inline-flex items-center px-3 py-1 rounded-full text-sm font-medium",
+            t.state === "duplicate" &&
+              "bg-red-100 text-red-700 border border-red-300",
+            t.state === "overflow" &&
+              "bg-gray-200 text-gray-600 border border-gray-300 line-through",
+            t.state === "ok" &&
+              "bg-green-100 text-green-700 border border-green-200"
+          )}
+          title={
+            t.state === "overflow"
+              ? "Above 30 limit – will not be copied"
+              : undefined
+          }
         >
-          {tag}
+          {t.value}
           <button
-            onClick={() => onRemove(tag)}
-            className="ml-2 bg-purple-50 text-pink-600 hover:text-pink-900"
-            aria-label={`Remove ${tag}`}
+            className="ml-2 hover:opacity-70"
+            onClick={() => onRemove(t.value)}
+            aria-label={`Remove ${t.value}`}
           >
-            <X size={14} className="bg-purple-50" />
+            <X size={14} />
           </button>
         </span>
       ))}

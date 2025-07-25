@@ -1,63 +1,145 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { removeDuplicateHashtags, extractHashtags } from "@/lib/hashtags";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import {
   Table,
   TableBody,
+  TableCell,
   TableHead,
   TableHeader,
   TableRow,
-  TableCell,
 } from "@/components/ui/table";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  extractHashtags,
+  MAX_HASHTAGS,
+  normalizeTag,
+  removeDuplicateHashtags,
+} from "@/lib/hashtags";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Clipboard } from "lucide-react";
-import HashtagPills from "./HashtagPills";
+import { HashtagCounter } from "./HashtagCounter";
+import HashtagPills, { PillTag } from "./HashtagPills";
+
+export const metadata = {
+  title: "Hashtag Cleaner",
+};
 
 export default function HashtagCleanerPage() {
   const [input, setInput] = useState<string>("#cutebaby #swag #cutebaby");
   const [output, setOutput] = useState<string>("");
-  const [hashtags, setHashtags] = useState<string[]>([]);
+  const [pillTags, setPillTags] = useState<PillTag[]>([]);
+  const removedStack = useRef<string[]>([]); // for undo
 
   const { stats } = useMemo(() => extractHashtags(input), [input]);
 
+  // compute pills in real-time
+  useEffect(() => {
+    // 1) build list (keep original order, but normalize for duplicate detection)
+    const raw = input.match(/#[\p{L}\p{N}_]+/gu) ?? [];
+    const seen = new Set<string>();
+    const duplicates = new Set<string>();
+
+    raw.forEach((t) => {
+      const n = normalizeTag(t);
+      if (seen.has(n)) duplicates.add(n);
+      else seen.add(n);
+    });
+
+    // 2) create pill array
+    const dedupedOrdered = raw.filter(
+      (t, i) => raw.findIndex((x) => normalizeTag(x) === normalizeTag(t)) === i
+    );
+
+    // apply 30 limit to unique ordered
+    const overflowStart = MAX_HASHTAGS;
+
+    const pills: PillTag[] = dedupedOrdered.map((t, idx) => {
+      const n = normalizeTag(t);
+      const isDuplicate = duplicates.has(n);
+      const state: PillTag["state"] = isDuplicate
+        ? "duplicate"
+        : idx >= overflowStart
+        ? "overflow"
+        : "ok";
+      return { value: t, state };
+    });
+
+    setPillTags(pills);
+  }, [input]);
+
   const onClean = () => {
     const cleaned = removeDuplicateHashtags(input);
-    setOutput(cleaned);
-    // optionally write to clipboard:
-    // navigator.clipboard.writeText(cleaned).catch(() => {});
+    // drop overflow too
+    const unique = cleaned.match(/#[\p{L}\p{N}_]+/gu) ?? [];
+    const unique30 = unique.slice(0, MAX_HASHTAGS);
+    const finalCleaned = unique30.join(" ");
+    setOutput(finalCleaned);
   };
 
   const onCopy = async () => {
-    await navigator.clipboard.writeText(output || input);
+    const toCopy = output || removeDuplicateHashtags(input);
+    await navigator.clipboard.writeText(toCopy);
     toast.success("Copied to clipboard", {
       position: "top-right",
       duration: 2000,
+      description: toCopy,
+      descriptionClassName: "border-t border-green-300 text-gray-800 p-2",
     });
   };
 
   const onClear = () => {
     setInput("");
     setOutput("");
+    setPillTags([]);
   };
+
   const removeTag = (tag: string) => {
-    setHashtags(hashtags.filter((t) => t !== tag));
+    removedStack.current.push(tag);
+    setInput((prev) =>
+      prev
+        .replace(new RegExp(`\\s*${escapeRegex(tag)}\\b`, "gi"), "")
+        .replace(/\s{2,}/g, " ")
+        .trim()
+    );
+    toast.info(`Removed ${tag}`, {
+      action: {
+        label: "Undo",
+        onClick: undoRemove,
+      },
+    });
   };
-  useEffect(() => {
-    const unique = removeDuplicateHashtags(input).split(/\s+/);
-    setHashtags(unique.filter((tag) => tag.startsWith("#")));
-  }, [input]);
+
+  const undoRemove = () => {
+    const last = removedStack.current.pop();
+    if (!last) return;
+    setInput((prev) => `${prev} ${last}`.trim());
+  };
+
+  const addSuggestion = (tag: string) => {
+    // avoid duplicates
+    const already = new Set(
+      (input.match(/#[\p{L}\p{N}_]+/gu) ?? []).map((t) => normalizeTag(t))
+    );
+    if (already.has(normalizeTag(tag))) {
+      toast.info("Already added");
+      return;
+    }
+    setInput((p) => (p ? `${p} ${tag}` : tag));
+  };
+
+  const totalUnique = pillTags.filter((p) => p.state !== "duplicate").length;
+  const countForLimit = Math.min(totalUnique, MAX_HASHTAGS);
 
   return (
     <main className="container mx-auto max-w-3xl py-10">
       <Card>
-        <CardHeader>
-          <CardTitle>Remove duplicate hashtags</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Hashtag Cleaner</CardTitle>
+          <HashtagCounter count={countForLimit} />
         </CardHeader>
 
         <CardContent className="space-y-6">
@@ -68,17 +150,31 @@ export default function HashtagCleanerPage() {
             <Textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              rows={8}
+              rows={6}
               placeholder="#cutebaby #swag #cutebaby"
             />
-            <HashtagPills hashtags={hashtags} onRemove={removeTag} />
-            <div className="flex gap-2">
+
+            <HashtagPills tags={pillTags} onRemove={removeTag} />
+
+            <div className="flex gap-2 mt-4">
               <Button variant="secondary" onClick={onClear}>
                 Clear
               </Button>
               <Button onClick={onClean}>Remove duplicate hashtags</Button>
+              <Button variant="outline" onClick={onCopy}>
+                Copy
+              </Button>
+              {removedStack.current.length > 0 && (
+                <Button variant="ghost" onClick={undoRemove}>
+                  Undo last
+                </Button>
+              )}
             </div>
           </div>
+
+          {/* <Separator /> */}
+
+          {/* <HashtagSuggestions onAdd={addSuggestion} /> */}
 
           {output && (
             <>
@@ -101,7 +197,6 @@ export default function HashtagCleanerPage() {
             <h3 className="text-sm font-semibold mb-4">
               Hashtag count statistics
             </h3>
-
             <Table>
               <TableHeader>
                 <TableRow>
@@ -132,7 +227,7 @@ export default function HashtagCleanerPage() {
                 <p className="text-sm font-medium mb-2">Duplicate hashtags</p>
                 <div className="flex flex-wrap gap-2">
                   {stats.duplicateList.map((d) => (
-                    <Badge key={d.tag} variant="secondary">
+                    <Badge key={d.tag} variant="destructive">
                       {d.tag} ({d.count}x)
                     </Badge>
                   ))}
@@ -144,4 +239,8 @@ export default function HashtagCleanerPage() {
       </Card>
     </main>
   );
+}
+
+function escapeRegex(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
