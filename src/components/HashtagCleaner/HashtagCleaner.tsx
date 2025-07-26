@@ -29,60 +29,112 @@ export const metadata = {
 };
 
 export default function HashtagCleanerPage() {
-  const [input, setInput] = useState<string>(
-    localStorage.getItem("hashtag_input") || "#cutebaby #swag #cutebaby"
-  );
+  const [isClient, setIsClient] = useState(false);
+  // lazy init for SSR safety
+  const [input, setInput] = useState<string>("#cutebaby #swag #cutebaby");
+
+  // const [input, setInput] = useState<string>(() => {
+  //   if (typeof window === "undefined") return "#cutebaby #swag #cutebaby";
+  //   return localStorage.getItem("hashtag_input") || "#cutebaby #swag #cutebaby";
+  // });
+
   const [output, setOutput] = useState<string>("");
   const [pillTags, setPillTags] = useState<PillTag[]>([]);
   const removedStack = useRef<string[]>([]); // for undo
+  const bootstrappedOrder = useRef<boolean>(false);
 
   const { stats } = useMemo(() => extractHashtags(input), [input]);
 
   // compute pills in real-time
   useEffect(() => {
-    // 1) build list (keep original order, but normalize for duplicate detection)
-    const raw = input.match(/#[\p{L}\p{N}_]+/gu) ?? [];
-    const seen = new Set<string>();
-    const duplicates = new Set<string>();
-    const map = new Map<string, number>();
+    if (isClient) {
+      const raw = input.match(/#[\p{L}\p{N}_]+/gu) ?? [];
+      const seen = new Set<string>();
+      const duplicates = new Set<string>();
+      const map = new Map<string, number>();
 
-    raw.forEach((t) => {
-      const n = normalizeTag(t);
-      map.set(n, (map.get(n) ?? 0) + 1);
-      if (seen.has(n)) duplicates.add(n);
-      else seen.add(n);
-    });
+      raw.forEach((t) => {
+        const n = normalizeTag(t);
+        map.set(n, (map.get(n) ?? 0) + 1);
+        if (seen.has(n)) duplicates.add(n);
+        else seen.add(n);
+      });
 
-    // 2) create pill array
-    const dedupedOrdered = raw.filter(
-      (t, i) => raw.findIndex((x) => normalizeTag(x) === normalizeTag(t)) === i
-    );
+      // dedupe (keep first appearance order)
+      const dedupedOrdered = raw.filter(
+        (t, i) =>
+          raw.findIndex((x) => normalizeTag(x) === normalizeTag(t)) === i
+      );
 
-    // apply 30 limit to unique ordered
-    const overflowStart = MAX_HASHTAGS;
+      const overflowStart = MAX_HASHTAGS;
 
-    const pills: PillTag[] = dedupedOrdered.map((t, idx) => {
-      const n = normalizeTag(t);
-      // const isDuplicate = duplicates.has(n);
-      const isDuplicate = map.get(n)! > 1;
-      const state: PillTag["state"] = isDuplicate
-        ? "duplicate"
-        : idx >= overflowStart
-        ? "overflow"
-        : "ok";
-      return { value: t, state, count: map.get(n) };
-    });
+      let pills: PillTag[] = dedupedOrdered.map((t, idx) => {
+        const n = normalizeTag(t);
+        const isDuplicate = map.get(n)! > 1;
+        const state: PillTag["state"] = isDuplicate
+          ? "duplicate"
+          : idx >= overflowStart
+          ? "overflow"
+          : "ok";
+        return { value: t, state, count: map.get(n) };
+      });
 
-    setPillTags(pills);
-    localStorage.setItem("hashtag_input", input);
+      // Restore order from localStorage once
+      if (!bootstrappedOrder.current && typeof window !== "undefined") {
+        const savedOrderRaw = localStorage.getItem("hashtag_order");
+        if (savedOrderRaw) {
+          try {
+            const savedOrder: string[] = JSON.parse(savedOrderRaw);
+            const orderMap = new Map<string, number>();
+            savedOrder.forEach((v, idx) => orderMap.set(v, idx));
+            pills = [...pills].sort((a, b) => {
+              const ai =
+                orderMap.get(a.value.toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+              const bi =
+                orderMap.get(b.value.toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+              return ai - bi;
+            });
+            // console.log({ raw, dedupedOrdered, pills, savedOrder });
+          } catch {}
+        }
+        bootstrappedOrder.current = true;
+      }
+
+      setPillTags(pills);
+    }
   }, [input]);
 
+  useEffect(() => {
+    setIsClient(true);
+    const saved = localStorage.getItem("hashtag_input");
+    if (saved) setInput(saved);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("hashtag_input", input);
+    // Persist only the order (values), not the whole objects
+    // localStorage.setItem(
+    //   "hashtag_order",
+    //   JSON.stringify(pillTags.map((p) => p.value.toLowerCase()))
+    // );
+  }, [input, pillTags]);
+
   const onClean = () => {
-    const cleaned = removeDuplicateHashtags(input);
-    // drop overflow too
-    const unique = cleaned.match(/#[\p{L}\p{N}_]+/gu) ?? [];
-    const unique30 = unique.slice(0, MAX_HASHTAGS);
-    const finalCleaned = unique30.join(" ");
+    // const cleaned = removeDuplicateHashtags(input);
+    // const unique = cleaned.match(/#[\p{L}\p{N}_]+/gu) ?? [];
+    // const unique30 = unique.slice(0, MAX_HASHTAGS);
+    // const finalCleaned = unique30.join(" ");
+    // setOutput(finalCleaned);
+
+    // Use the order of pillTags
+
+    const uniqueTags = pillTags
+      // .filter((tag) => tag.state !== "duplicate" && tag.state !== "overflow")
+      .map((tag) => tag.value);
+
+    const finalCleaned = uniqueTags.join(" ");
+    // console.log({ finalCleaned, uniqueTags, pillTags });
     setOutput(finalCleaned);
   };
 
@@ -128,20 +180,18 @@ export default function HashtagCleanerPage() {
     setInput((prev) => `${prev} ${last}`.trim());
   };
 
-  const addSuggestion = (tag: string) => {
-    // avoid duplicates
-    const already = new Set(
-      (input.match(/#[\p{L}\p{N}_]+/gu) ?? []).map((t) => normalizeTag(t))
-    );
-    if (already.has(normalizeTag(tag))) {
-      toast.info("Already added");
-      return;
-    }
-    setInput((p) => (p ? `${p} ${tag}` : tag));
-  };
-
   const totalUnique = pillTags.filter((p) => p.state !== "duplicate").length;
   const countForLimit = Math.min(totalUnique, MAX_HASHTAGS);
+
+  const onReorder = (newTags: PillTag[]) => {
+    setPillTags(newTags);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(
+        "hashtag_order",
+        JSON.stringify(newTags.map((p) => p.value.toLowerCase()))
+      );
+    }
+  };
 
   return (
     <main className="container mx-auto max-w-3xl py-10">
@@ -163,7 +213,11 @@ export default function HashtagCleanerPage() {
               placeholder="#cutebaby #swag #cutebaby"
             />
 
-            <HashtagPills tags={pillTags} onRemove={removeTag} />
+            <HashtagPills
+              tags={pillTags}
+              onRemove={removeTag}
+              onReorder={onReorder}
+            />
 
             <div className="flex gap-2 mt-4">
               <Button variant="secondary" onClick={onClear}>
@@ -183,10 +237,6 @@ export default function HashtagCleanerPage() {
               )}
             </div>
           </div>
-
-          {/* <Separator /> */}
-
-          {/* <HashtagSuggestions onAdd={addSuggestion} /> */}
 
           {output && (
             <>
