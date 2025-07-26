@@ -8,6 +8,7 @@ type TagState = "ok" | "duplicate" | "overflow";
 export interface PillTag {
   value: string;
   state: TagState;
+  count?: number; // New: to store duplicate count
 }
 
 export default function HashtagPills({
@@ -37,7 +38,7 @@ export default function HashtagPills({
               : undefined
           }
         >
-          {t.value}
+          {t.value} {t.state === "duplicate" && t.count && `(${t.count}x)`}
           <button
             className="ml-2 hover:opacity-70"
             onClick={() => onRemove(t.value)}

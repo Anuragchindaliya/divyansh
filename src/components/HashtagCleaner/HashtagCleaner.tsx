@@ -29,7 +29,9 @@ export const metadata = {
 };
 
 export default function HashtagCleanerPage() {
-  const [input, setInput] = useState<string>("#cutebaby #swag #cutebaby");
+  const [input, setInput] = useState<string>(
+    localStorage.getItem("hashtag_input") || "#cutebaby #swag #cutebaby"
+  );
   const [output, setOutput] = useState<string>("");
   const [pillTags, setPillTags] = useState<PillTag[]>([]);
   const removedStack = useRef<string[]>([]); // for undo
@@ -42,9 +44,11 @@ export default function HashtagCleanerPage() {
     const raw = input.match(/#[\p{L}\p{N}_]+/gu) ?? [];
     const seen = new Set<string>();
     const duplicates = new Set<string>();
+    const map = new Map<string, number>();
 
     raw.forEach((t) => {
       const n = normalizeTag(t);
+      map.set(n, (map.get(n) ?? 0) + 1);
       if (seen.has(n)) duplicates.add(n);
       else seen.add(n);
     });
@@ -59,16 +63,18 @@ export default function HashtagCleanerPage() {
 
     const pills: PillTag[] = dedupedOrdered.map((t, idx) => {
       const n = normalizeTag(t);
-      const isDuplicate = duplicates.has(n);
+      // const isDuplicate = duplicates.has(n);
+      const isDuplicate = map.get(n)! > 1;
       const state: PillTag["state"] = isDuplicate
         ? "duplicate"
         : idx >= overflowStart
         ? "overflow"
         : "ok";
-      return { value: t, state };
+      return { value: t, state, count: map.get(n) };
     });
 
     setPillTags(pills);
+    localStorage.setItem("hashtag_input", input);
   }, [input]);
 
   const onClean = () => {
@@ -106,6 +112,9 @@ export default function HashtagCleanerPage() {
         .trim()
     );
     toast.info(`Removed ${tag}`, {
+      classNames: {
+        actionButton: "bg-purple-50 rounded-md p-2",
+      },
       action: {
         label: "Undo",
         onClick: undoRemove,
@@ -160,7 +169,10 @@ export default function HashtagCleanerPage() {
               <Button variant="secondary" onClick={onClear}>
                 Clear
               </Button>
-              <Button onClick={onClean}>Remove duplicate hashtags</Button>
+              <Button onClick={onClean}>
+                Remove duplicate{" "}
+                <span className="sm:block hidden">hashtags</span>
+              </Button>
               <Button variant="outline" onClick={onCopy}>
                 Copy
               </Button>
