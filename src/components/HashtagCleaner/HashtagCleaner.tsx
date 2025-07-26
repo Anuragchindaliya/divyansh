@@ -23,6 +23,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { HashtagCounter } from "./HashtagCounter";
 import HashtagPills, { PillTag } from "./HashtagPills";
+import HashtagSuggestions from "./HashtagSuggestions";
+import { Copy, Hash, Trash } from "lucide-react";
 
 export const metadata = {
   title: "Hashtag Cleaner",
@@ -192,6 +194,17 @@ export default function HashtagCleanerPage() {
       );
     }
   };
+  const addSuggestion = (tag: string) => {
+    // avoid duplicates
+    const already = new Set(
+      (input.match(/#[\p{L}\p{N}_]+/gu) ?? []).map((t) => normalizeTag(t))
+    );
+    if (already.has(normalizeTag(tag))) {
+      toast.info("Already added");
+      return;
+    }
+    setInput((p) => (p ? `${p} ${tag}` : tag));
+  };
 
   return (
     <main className="container mx-auto max-w-3xl py-10">
@@ -221,13 +234,16 @@ export default function HashtagCleanerPage() {
 
             <div className="flex gap-2 mt-4">
               <Button variant="secondary" onClick={onClear}>
+                <Trash size={16} />
                 Clear
               </Button>
               <Button onClick={onClean}>
+                <Hash size={16} />
                 Remove duplicate{" "}
                 <span className="sm:block hidden">hashtags</span>
               </Button>
               <Button variant="outline" onClick={onCopy}>
+                <Copy size={16} />
                 Copy
               </Button>
               {removedStack.current.length > 0 && (
@@ -245,6 +261,7 @@ export default function HashtagCleanerPage() {
                 <div className="flex items-center justify-between mb-1">
                   <h3 className="text-sm font-semibold mb-2">Cleaned output</h3>
                   <Button variant="outline" onClick={onCopy}>
+                    <Copy size={16} />
                     Copy
                   </Button>
                 </div>
@@ -254,6 +271,7 @@ export default function HashtagCleanerPage() {
           )}
 
           <Separator />
+          <HashtagSuggestions onAdd={addSuggestion} />
 
           <div>
             <h3 className="text-sm font-semibold mb-4">
